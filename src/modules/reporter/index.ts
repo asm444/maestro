@@ -118,15 +118,20 @@ export class ReporterModule implements MaestroModule {
     console.log('Relatorio gerado em .maestro/reports/dry_run.md');
   }
 
+  private sanitizeId(id: string): string {
+    return id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100);
+  }
+
   private async saveReport(report: CycleReport): Promise<void> {
     const reportsDir = path.join(this.kernel.config.maestroDir, 'reports');
     await fs.mkdir(reportsDir, { recursive: true });
 
+    const safeId = this.sanitizeId(report.id);
     const mdContent = this.markdownFormatter.formatCycleReport(report);
-    await fs.writeFile(path.join(reportsDir, `cycle_${report.id}.md`), mdContent);
+    await fs.writeFile(path.join(reportsDir, `cycle_${safeId}.md`), mdContent);
 
     const jsonContent = this.jsonFormatter.formatCycleReport(report);
-    await fs.writeFile(path.join(reportsDir, `cycle_${report.id}.json`), jsonContent);
+    await fs.writeFile(path.join(reportsDir, `cycle_${safeId}.json`), jsonContent);
 
     await this.metricsCollector.collect(report, this.kernel.config.maestroDir);
   }

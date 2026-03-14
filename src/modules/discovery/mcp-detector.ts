@@ -67,7 +67,7 @@ export class McpDetector {
     try {
       const raw = await readFile(join(repoRoot, '.mcp.json'), 'utf-8');
       const parsed = JSON.parse(raw) as RawMcpJson;
-      return parsed.mcpServers ?? {};
+      return this.sanitizeServerMap(parsed.mcpServers ?? {});
     } catch {
       return {};
     }
@@ -78,10 +78,21 @@ export class McpDetector {
       const settingsPath = join(homedir(), '.claude', 'settings.json');
       const raw = await readFile(settingsPath, 'utf-8');
       const parsed = JSON.parse(raw) as RawClaudeSettings;
-      return parsed.mcpServers ?? {};
+      return this.sanitizeServerMap(parsed.mcpServers ?? {});
     } catch {
       return {};
     }
+  }
+
+  private sanitizeServerMap(map: Record<string, RawMcpServer>): Record<string, RawMcpServer> {
+    const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+    const clean: Record<string, RawMcpServer> = Object.create(null);
+    for (const [key, val] of Object.entries(map)) {
+      if (!UNSAFE_KEYS.has(key) && val && typeof val === 'object') {
+        clean[key] = val;
+      }
+    }
+    return clean;
   }
 
   private normalise(

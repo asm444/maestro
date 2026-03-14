@@ -58,11 +58,13 @@ done
 
 if [ "$FOUND" -eq 1 ]; then
   # Retorna JSON de bloqueio para o Claude Code
-  python3 -c "
-import json
+  # Passa MATCHED_PATTERN via env var para evitar shell injection
+  MATCHED_PATTERN="$MATCHED_PATTERN" python3 -c "
+import json, os
+pattern = os.environ.get('MATCHED_PATTERN', 'unknown')
 result = {
   'decision': 'block',
-  'reason': 'Maestro Security Guard: Possível secret detectado no conteúdo. Padrão: $MATCHED_PATTERN. Use variáveis de ambiente (\$ENV_VAR) em vez de credenciais hardcoded.'
+  'reason': f'Maestro Security Guard: Possivel secret detectado. Padrao: {pattern}. Use variaveis de ambiente em vez de credenciais hardcoded.'
 }
 print(json.dumps(result))
 "

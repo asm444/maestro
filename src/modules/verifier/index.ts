@@ -2,7 +2,8 @@
 // Maestro v2 — Verifier Module
 // ============================================================
 
-import path from 'path';
+import * as path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import type {
   MaestroModule,
   Kernel,
@@ -76,10 +77,11 @@ export class VerifierModule implements MaestroModule {
     response: SubagentResponse,
     repoRoot: string,
   ): Promise<VerificationResult> {
-    // 1 — Security scan: resolve paths relative to repoRoot when not absolute
-    const absolutePaths = (response.touched_files ?? []).map((f) =>
-      path.isAbsolute(f) ? f : path.join(repoRoot, f),
-    );
+    // 1 — Security scan: resolve paths relative to repoRoot, with containment check
+    const resolvedBase = path.resolve(repoRoot);
+    const absolutePaths = (response.touched_files ?? [])
+      .map((f) => path.resolve(repoRoot, f))
+      .filter((resolved) => resolved.startsWith(resolvedBase + path.sep) || resolved === resolvedBase);
     const securityFindings = this.secScanner.scanFiles(absolutePaths);
     const hasCritical = this.secScanner.hasCriticalFindings(securityFindings);
 
@@ -147,8 +149,6 @@ export class VerifierModule implements MaestroModule {
   }
 
   private detectFallbackCommands(repoRoot: string): string[] {
-    const { existsSync, readFileSync } = await_require_sync(repoRoot);
-
     const pkgPath = path.join(repoRoot, 'package.json');
     if (existsSync(pkgPath)) {
       try {
@@ -168,17 +168,6 @@ export class VerifierModule implements MaestroModule {
 
     return [];
   }
-}
-
-// Inline sync require wrapper to avoid top-level import of 'fs'
-// (keeps the module's async surface clean)
-function await_require_sync(_repoRoot: string): {
-  existsSync: (p: string) => boolean;
-  readFileSync: (p: string, enc: string) => string;
-} {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const fs = require('fs') as typeof import('fs');
-  return { existsSync: fs.existsSync, readFileSync: fs.readFileSync as (p: string, enc: string) => string };
 }
 
 export default VerifierModule;

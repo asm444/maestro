@@ -103,6 +103,8 @@ export class SecurityScanner {
       const lines = content.split('\n');
       for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
         const lineText = lines[lineIdx];
+        // Skip very long lines to prevent ReDoS on minified files
+        if (lineText.length > 2000) continue;
         for (const rule of SCAN_RULES) {
           if (rule.pattern.test(lineText)) {
             findings.push({

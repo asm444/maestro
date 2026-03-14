@@ -1,4 +1,5 @@
 import { readFile } from 'fs/promises';
+import * as path from 'node:path';
 import type {
   Ticket,
   ContextCapsule,
@@ -179,11 +180,19 @@ export class Dispatcher {
 
   // ── Private helpers ───────────────────────────────────────────
 
-  private async readFiles(paths: string[]): Promise<FileContent[]> {
+  private async readFiles(paths: string[], repoRoot?: string): Promise<FileContent[]> {
     return Promise.all(
       paths.map(async (p) => {
         try {
-          const content = await readFile(p, 'utf-8');
+          const resolved = repoRoot ? path.resolve(repoRoot, p) : path.resolve(p);
+          // Path containment check — prevent reading outside repoRoot
+          if (repoRoot) {
+            const resolvedBase = path.resolve(repoRoot);
+            if (!resolved.startsWith(resolvedBase + path.sep) && resolved !== resolvedBase) {
+              return { path: p, content: '', exists: false };
+            }
+          }
+          const content = await readFile(resolved, 'utf-8');
           return { path: p, content, exists: true };
         } catch {
           return { path: p, content: '', exists: false };

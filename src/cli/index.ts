@@ -30,9 +30,10 @@ async function createKernel(repoRoot: string): Promise<MaestroKernel> {
 }
 
 async function main(): Promise<void> {
+  const path = await import('node:path');
   const args = process.argv.slice(2);
   const command = args[0];
-  const repoRoot = args[1] || process.cwd();
+  const repoRoot = path.resolve(args[1] || process.cwd());
 
   if (!command) {
     console.log('Uso: maestro <command> [repoRoot] [args...]');

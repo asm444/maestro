@@ -147,7 +147,8 @@ function parseYaml(text: string): Record<string, unknown> {
   }
 
   function parseMap(baseIndent: number): Record<string, unknown> {
-    const obj: Record<string, unknown> = {};
+    const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+    const obj: Record<string, unknown> = Object.create(null);
     while (i < lines.length) {
       const line = lines[i];
       if (line.trim() === '' || line.trim().startsWith('#')) { i++; continue; }
@@ -157,6 +158,7 @@ function parseYaml(text: string): Record<string, unknown> {
       const colonIdx = content.indexOf(':');
       if (colonIdx === -1) { i++; continue; }
       const key = content.slice(0, colonIdx).trim();
+      if (UNSAFE_KEYS.has(key)) { i++; continue; }
       const rest = content.slice(colonIdx + 1).trim();
       i++;
       if (rest === '' || rest === '|' || rest === '>') {
@@ -247,7 +249,9 @@ export class StateModule implements MaestroModule {
 
   async logDecision(decision: string, reasoning: string): Promise<void> {
     const timestamp = new Date().toISOString();
-    const entry = `[${timestamp}] DECISION: ${decision}\nREASONING: ${reasoning}\n${'─'.repeat(60)}\n`;
+    const safeDec = decision.slice(0, 500).replace(/[\r\n]/g, ' ');
+    const safeReas = reasoning.slice(0, 2000).replace(/[\r\n]/g, ' ');
+    const entry = `[${timestamp}] ${safeDec}: ${safeReas}\n`;
     await fs.appendFile(this.decisionsLog, entry, 'utf-8');
   }
 
@@ -274,7 +278,14 @@ export class StateModule implements MaestroModule {
     return tickets;
   }
 
+  private validateTicketId(id: string): void {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+      throw new Error(`Invalid ticket ID: "${id}". Only alphanumeric, hyphens and underscores allowed.`);
+    }
+  }
+
   async getTicket(id: string): Promise<Ticket | null> {
+    this.validateTicketId(id);
     const ticketPath = path.join(this.maestroDir, 'tasks', `${id}.yaml`);
     try {
       const raw = await fs.readFile(ticketPath, 'utf-8');
@@ -286,6 +297,7 @@ export class StateModule implements MaestroModule {
   }
 
   async saveTicket(ticket: Ticket): Promise<void> {
+    this.validateTicketId(ticket.id);
     const ticketPath = path.join(this.maestroDir, 'tasks', `${ticket.id}.yaml`);
     const yaml = serializeYaml(ticket as unknown as Record<string, unknown>);
     await fs.writeFile(ticketPath, yaml + '\n', 'utf-8');
@@ -301,6 +313,7 @@ export class StateModule implements MaestroModule {
   }
 
   getTicketPath(id: string): string {
+    this.validateTicketId(id);
     return path.join(this.maestroDir, 'tasks', `${id}.yaml`);
   }
 }
