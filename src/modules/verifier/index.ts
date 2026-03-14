@@ -37,12 +37,13 @@ export class VerifierModule implements MaestroModule {
   private runner = new QaRunner();
   private dodChecker = new DodChecker();
   private secScanner = new SecurityScanner();
+  private ticketCompletedHandler: ((payload: unknown) => Promise<void>) | null = null;
 
   async init(kernel: Kernel): Promise<void> {
     this.kernel = kernel;
 
     // Auto-verify whenever a ticket is completed
-    kernel.bus.on(EVENTS.TICKET_COMPLETED, async (payload) => {
+    this.ticketCompletedHandler = async (payload: unknown) => {
       const { ticket, response } = payload as {
         ticket: Ticket;
         response: SubagentResponse;
@@ -57,11 +58,15 @@ export class VerifierModule implements MaestroModule {
         result.passed ? EVENTS.QA_APPROVED : EVENTS.QA_REJECTED,
         { ticket, result },
       );
-    });
+    };
+    kernel.bus.on(EVENTS.TICKET_COMPLETED, this.ticketCompletedHandler);
   }
 
   async dispose(): Promise<void> {
-    // Nothing to tear down
+    if (this.ticketCompletedHandler) {
+      this.kernel.bus.off(EVENTS.TICKET_COMPLETED, this.ticketCompletedHandler);
+      this.ticketCompletedHandler = null;
+    }
   }
 
   // ── Public API ────────────────────────────────────────────

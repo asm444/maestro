@@ -15,6 +15,8 @@ import type {
 
 // ── YAML serializer/parser (zero external deps) ─────────────
 
+const YAML_AMBIGUOUS = new Set(['true', 'false', 'null', 'yes', 'no', 'on', 'off', '~']);
+
 function serializeYaml(value: unknown, indent = 0): string {
   const pad = '  '.repeat(indent);
 
@@ -27,17 +29,20 @@ function serializeYaml(value: unknown, indent = 0): string {
   }
 
   if (typeof value === 'string') {
-    // Quote strings that contain special YAML characters or look ambiguous
-    if (
+    // Quote strings that could be misinterpreted by the parser
+    const needsQuoting =
       value === '' ||
       value.includes(':') ||
       value.includes('#') ||
       value.includes('\n') ||
+      value.includes('\r') ||
       value.startsWith(' ') ||
       value.startsWith("'") ||
-      value.startsWith('"')
-    ) {
-      return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+      value.startsWith('"') ||
+      YAML_AMBIGUOUS.has(value.toLowerCase()) ||
+      !isNaN(Number(value));
+    if (needsQuoting) {
+      return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r')}"`;
     }
     return value;
   }
@@ -45,7 +50,17 @@ function serializeYaml(value: unknown, indent = 0): string {
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]';
     return value
-      .map((item) => `${pad}- ${serializeYaml(item, indent + 1)}`)
+      .map((item) => {
+        if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+          // For object items in arrays: put first key on same line as "- "
+          const objStr = serializeYaml(item, indent + 2);
+          const objLines = objStr.split('\n');
+          const firstLine = objLines[0].trimStart();
+          const rest = objLines.slice(1).join('\n');
+          return `${pad}- ${firstLine}${rest ? '\n' + rest : ''}`;
+        }
+        return `${pad}- ${serializeYaml(item, indent + 1)}`;
+      })
       .join('\n');
   }
 
@@ -135,9 +150,38 @@ function parseYaml(text: string): Record<string, unknown> {
         i++;
         arr.push(parseBlock(baseIndent + 2));
       } else if (rawVal.includes(': ') || rawVal.endsWith(':')) {
-        // Inline map item not supported — treat as string
+        // Inline map: "- key: value" followed by continuation keys at deeper indent
+        const colonIdx = rawVal.indexOf(':');
+        const key = rawVal.slice(0, colonIdx).trim();
+        const rest = rawVal.slice(colonIdx + 1).trim();
+        const obj: Record<string, unknown> = Object.create(null);
+        obj[key] = rest === '' ? null : parseValue(rest);
         i++;
-        arr.push(parseValue(rawVal));
+        // Read continuation keys at baseIndent + 2
+        const contIndent = baseIndent + 2;
+        while (i < lines.length) {
+          const contLine = lines[i];
+          if (contLine.trim() === '') { i++; continue; }
+          if (getIndent(contLine) < contIndent) break;
+          const contContent = contLine.slice(contIndent);
+          const cIdx = contContent.indexOf(':');
+          if (cIdx === -1) break;
+          const cKey = contContent.slice(0, cIdx).trim();
+          const cRest = contContent.slice(cIdx + 1).trim();
+          if (cRest === '' || cRest === '|' || cRest === '>') {
+            i++;
+            const nextLine = lines[i];
+            if (nextLine !== undefined && getIndent(nextLine) > contIndent && nextLine.trim() !== '') {
+              obj[cKey] = parseBlock(getIndent(nextLine));
+            } else {
+              obj[cKey] = null;
+            }
+          } else {
+            obj[cKey] = parseValue(cRest);
+            i++;
+          }
+        }
+        arr.push(obj);
       } else {
         i++;
         arr.push(parseValue(rawVal));
@@ -304,6 +348,17 @@ export class StateModule implements MaestroModule {
 
     // Keep state.tickets index in sync
     await this.updateTicketStatus(ticket.id, ticket.status);
+  }
+
+  async readPlan(): Promise<MaestroPlan | null> {
+    const planPath = path.join(this.maestroDir, 'plan.yaml');
+    try {
+      const raw = await fs.readFile(planPath, 'utf-8');
+      const parsed = parseYaml(raw);
+      return parsed as unknown as MaestroPlan;
+    } catch {
+      return null;
+    }
   }
 
   async savePlan(plan: MaestroPlan): Promise<void> {

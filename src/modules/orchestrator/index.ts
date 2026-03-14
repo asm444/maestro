@@ -17,7 +17,13 @@ import { ConflictResolver } from './conflict-resolver.js';
 // Forward-declare minimal interface for the modules we depend on
 interface StateModule extends MaestroModule {
   updateTicketStatus(id: string, status: Ticket['status']): Promise<void>;
-  persistTicket(ticket: Ticket): Promise<void>;
+  saveTicket(ticket: Ticket): Promise<void>;
+  listTickets(): Promise<Ticket[]>;
+  getTicket(id: string): Promise<Ticket | null>;
+}
+
+interface DiscoveryModuleRef extends MaestroModule {
+  getCached(): import('../../kernel/types.js').DiscoveryResult | null;
 }
 
 // ============================================================
@@ -53,7 +59,7 @@ export class OrchestratorModule implements MaestroModule {
   async run(plan: MaestroPlan): Promise<CycleReport> {
     const cycleId = `cycle-${Date.now()}`;
     const startedAt = new Date().toISOString();
-    const allTickets = this.collectTickets(plan);
+    const allTickets = await this.collectTickets(plan);
 
     await this.kernel.bus.emit(EV.CYCLE_STARTED, { cycleId, plan });
 
@@ -104,7 +110,7 @@ export class OrchestratorModule implements MaestroModule {
    * Dispatches a single ticket by ID, reading it from the plan's phase list.
    */
   async dispatchSingle(ticketId: string, plan: MaestroPlan): Promise<TicketReport> {
-    const allTickets = this.collectTickets(plan);
+    const allTickets = await this.collectTickets(plan);
     const ticket = allTickets.find((t) => t.id === ticketId);
 
     if (!ticket) {
@@ -124,20 +130,25 @@ export class OrchestratorModule implements MaestroModule {
     _ticketMap: Map<string, Ticket>,
   ): Promise<{ report: TicketReport; response: SubagentResponse | null }> {
     const startMs = Date.now();
-    ticket.status = 'in_progress';
+    const stateModule = this.kernel.getModule<StateModule>('state');
+    const MAX_LOOP = (this.kernel.config.maxRetries || 2) + 2;
+    let loopCount = 0;
 
+    ticket.status = 'in_progress';
+    await stateModule.saveTicket(ticket);
     await this.kernel.bus.emit(EV.TICKET_DISPATCHED, { ticketId: ticket.id });
 
     let response: SubagentResponse | null = null;
     let lastError = '';
 
-    while (true) {
+    while (loopCount++ < MAX_LOOP) {
       try {
         response = await this.dispatchToSubagent(ticket, plan);
         ticket.status = 'completed';
+        await stateModule.saveTicket(ticket);
 
         await this.kernel.bus.emit(EV.TICKET_COMPLETED, {
-          ticketId: ticket.id,
+          ticket,
           response,
         });
 
@@ -148,6 +159,7 @@ export class OrchestratorModule implements MaestroModule {
 
         if (this.retryEngine.shouldRetry(ticket, lastError)) {
           ticket.status = 'retrying';
+          await stateModule.saveTicket(ticket);
           await this.kernel.bus.emit(EV.TICKET_RETRYING, {
             ticketId: ticket.id,
             attempt: ticket.retries,
@@ -156,8 +168,8 @@ export class OrchestratorModule implements MaestroModule {
 
           await this.delay(this.kernel.config.retryDelayMs);
         } else {
-          // Escalate
           ticket.status = 'escalated';
+          await stateModule.saveTicket(ticket);
           const escalation = this.retryEngine.createEscalationTicket(
             ticket,
             ticket.error_history,
@@ -204,10 +216,15 @@ export class OrchestratorModule implements MaestroModule {
    */
   async buildCapsuleForTicket(ticketId: string): Promise<import('../../kernel/types.js').ContextCapsule | null> {
     const stateModule = this.kernel.getModule<StateModule>('state');
-    const ticket = await (stateModule as unknown as { getTicket(id: string): Promise<Ticket | null> }).getTicket(ticketId);
+    const ticket = await stateModule.getTicket(ticketId);
     if (!ticket) return null;
-    const discovery = (this.kernel.getModule('discovery') as unknown as { getCachedDiscovery(): import('../../kernel/types.js').DiscoveryResult | null }).getCachedDiscovery?.();
-    const defaultDiscovery = { stack: { languages: [], frameworks: [], package_managers: [], build_tools: [], test_frameworks: [], ci_cd: [], detected_commands: {} }, mcps: [], skills: [] };
+    const discoveryModule = this.kernel.getModule<DiscoveryModuleRef>('discovery');
+    const discovery = discoveryModule.getCached();
+    const defaultDiscovery: import('../../kernel/types.js').DiscoveryResult = {
+      stack: { languages: [], frameworks: [], package_managers: [], build_tools: [], test_frameworks: [], ci_cd: [], detected_commands: {} },
+      mcps: [],
+      skills: [],
+    };
     return this.dispatcher.buildCapsule(ticket, discovery ?? defaultDiscovery);
   }
 
@@ -228,39 +245,37 @@ export class OrchestratorModule implements MaestroModule {
     const capsule = await this.dispatcher.buildCapsule(ticket, discovery, retryCtx);
     const prompt = this.dispatcher.formatCapsuleAsPrompt(capsule);
 
-    // Emit for external runners (CLI, Agent tool, etc.) to pick up
-    const responsePayload = await this.kernel.bus.emit('subagent:invoke', {
+    // Emit event for external runners (CLI, Agent tool, etc.)
+    // Note: actual subagent execution is done by Claude Code Agent tool,
+    // not programmatically. This event allows listeners to capture the prompt.
+    await this.kernel.bus.emit('subagent:invoke', {
       ticket,
       capsule,
       prompt,
     });
 
-    // If no external handler returned a response, produce a stub
-    // (useful in unit tests and dry-run mode)
-    return (responsePayload as SubagentResponse | undefined) ?? this.stubResponse(ticket);
+    // In programmatic mode, return stub. Real execution happens via Claude Code slash commands.
+    return this.stubResponse(ticket);
   }
 
   // ── Private: helpers ──────────────────────────────────────────
 
-  private collectTickets(plan: MaestroPlan): Ticket[] {
-    // Tickets are stored in plan.phases[].ticket_ids; actual ticket objects
-    // must be loaded from state. If state module is available, use it.
-    // Otherwise fall back to an empty list (caller must pre-populate tickets).
-    try {
-      const stateModule = this.kernel.getModule<StateModule>('state');
-      // StateModule is expected to have a getTickets() method in practice;
-      // here we use a best-effort cast.
-      const tickets: Ticket[] = (stateModule as unknown as { getTickets(): Ticket[] }).getTickets?.() ?? [];
-      if (tickets.length > 0) return tickets;
-    } catch {
-      // state module not loaded — fall through
+  private async collectTickets(plan: MaestroPlan): Promise<Ticket[]> {
+    const stateModule = this.kernel.getModule<StateModule>('state');
+
+    // Load tickets in plan phase order
+    const orderedIds = plan.phases.flatMap(p => p.ticket_ids);
+    const tickets: Ticket[] = [];
+
+    for (const id of orderedIds) {
+      const ticket = await stateModule.getTicket(id);
+      if (ticket) tickets.push(ticket);
     }
 
-    // If plan carries inline tickets (not standard, but useful for testing)
-    const inline = (plan as unknown as { tickets?: Ticket[] }).tickets;
-    if (inline && Array.isArray(inline)) return inline;
+    if (tickets.length > 0) return tickets;
 
-    return [];
+    // Fallback: load all tickets from state
+    return stateModule.listTickets();
   }
 
   private evaluateDod(ticket: Ticket, response: SubagentResponse | null): DodResult[] {

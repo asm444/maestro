@@ -21,18 +21,24 @@ export class ReporterModule implements MaestroModule {
   private metricsCollector = new MetricsCollector();
   private markdownFormatter = new MarkdownFormatter();
   private jsonFormatter = new JsonFormatter();
+  private cycleHandler: ((payload: unknown) => Promise<void>) | null = null;
 
   async init(kernel: Kernel): Promise<void> {
     this.kernel = kernel;
 
-    // Listen for cycle completion
-    kernel.bus.on('cycle:completed', async (payload) => {
+    this.cycleHandler = async (payload: unknown) => {
       const report = payload as CycleReport;
       await this.saveReport(report);
-    });
+    };
+    kernel.bus.on('cycle:completed', this.cycleHandler);
   }
 
-  async dispose(): Promise<void> {}
+  async dispose(): Promise<void> {
+    if (this.cycleHandler) {
+      this.kernel.bus.off('cycle:completed', this.cycleHandler);
+      this.cycleHandler = null;
+    }
+  }
 
   async generateReport(
     cycleId: string,
@@ -63,7 +69,7 @@ export class ReporterModule implements MaestroModule {
       completed_at: new Date().toISOString(),
       tickets: ticketReports,
       metrics,
-      verdict: metrics.failed === 0 ? 'success' : 'failed',
+      verdict: (metrics.failed === 0 && metrics.escalated === 0) ? 'success' : 'failed',
     };
 
     const reportsDir = path.join(this.kernel.config.maestroDir, 'reports');

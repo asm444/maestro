@@ -108,6 +108,11 @@ export class RouterModule implements MaestroModule {
   async dispose(): Promise<void> {}
 
   routeTicket(ticket: Ticket): Department {
+    // If ticket already has explicit department from template, respect it
+    if (ticket.department && DEPARTMENTS.includes(ticket.department)) {
+      return ticket.department;
+    }
+
     // 1. By file patterns
     const scores = new Map<Department, number>();
     for (const rule of ROUTING_RULES) {

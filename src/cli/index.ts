@@ -57,6 +57,18 @@ async function main(): Promise<void> {
       case 'verify':
         await verifyCommand(kernel);
         break;
+      case 'run': {
+        const state = kernel.getModule<StateModule>('state');
+        const planYaml = await state.readPlan();
+        if (!planYaml) {
+          console.error('Nenhum plano encontrado. Execute /maestro-plan primeiro.');
+          process.exit(1);
+        }
+        const orchestrator = kernel.getModule<OrchestratorModule>('orchestrator');
+        const report = await orchestrator.run(planYaml);
+        console.log(`Ciclo completo: ${report.verdict}. ${report.metrics.completed}/${report.metrics.total_tickets} tickets.`);
+        break;
+      }
       case 'status':
         await statusCommand(kernel);
         break;
