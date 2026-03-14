@@ -1,0 +1,8 @@
+{
+  "name": "maestro",
+  "version": "2.0.0",
+  "description": "Orquestrador universal multiagente v2 — rewrite modular TypeScript com skills integradas, deteccao dinamica de MCPs, retry inteligente e observabilidade",
+  "author": {
+    "name": "Arthur de Souza Molina"
+  }
+}

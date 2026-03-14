@@ -1,0 +1,35 @@
+{
+  "name": "maestro",
+  "version": "2.0.0",
+  "description": "Orquestrador universal multiagente para Claude Code — rewrite modular TypeScript",
+  "main": "dist/cli/index.js",
+  "bin": {
+    "maestro": "bin/maestro"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "prebuild": "rm -rf dist",
+    "test": "node --test test/unit/*.test.js",
+    "test:integration": "node --test test/integration/*.test.js",
+    "test:all": "node --test test/**/*.test.js",
+    "test:verbose": "node --test --test-reporter=spec test/unit/*.test.js",
+    "lint": "tsc --noEmit",
+    "start": "node dist/cli/index.js"
+  },
+  "keywords": [
+    "claude-code",
+    "plugin",
+    "orchestrator",
+    "multiagent",
+    "typescript"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.7.0"
+  }
+}

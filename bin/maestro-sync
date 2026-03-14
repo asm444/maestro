@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# maestro-sync — Sincroniza o plugin do diretório de desenvolvimento para o cache do Claude Code
+set -euo pipefail
+
+SRC="/home/asm444/Projetos/maestro"
+DEST="$HOME/.claude/plugins/cache/local/maestro/0.1.0"
+
+if [ ! -d "$DEST" ]; then
+  echo "[sync] Cache não encontrado: $DEST"
+  echo "[sync] Execute primeiro: node $SRC/scripts/maestro.js --help"
+  exit 1
+fi
+
+rsync -a --delete \
+  --exclude='.maestro/' \
+  --exclude='node_modules/' \
+  --exclude='.git/' \
+  --exclude='test/' \
+  "$SRC/" "$DEST/"
+
+echo "[sync] Plugin sincronizado: $SRC → $DEST"
+echo "[sync] Reinicie o Claude Code para carregar as mudanças."

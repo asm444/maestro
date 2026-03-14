@@ -1,0 +1,57 @@
+{
+  "name": "Arthur de Souza Molina",
+  "description": "Perfil pessoal — ecossistema completo com todos os MCPs e skills",
+  "mcps": {
+    "required": [
+      "github",
+      "docker",
+      "sentry",
+      "playwright",
+      "context7"
+    ],
+    "optional": [
+      "serena",
+      "figma",
+      "semantic-scholar",
+      "n8n",
+      "memory",
+      "apidog",
+      "excalidraw"
+    ]
+  },
+  "skills": {
+    "core": [
+      "implementacao-inteligente",
+      "tdd",
+      "seguranca-cia",
+      "testagem-inteligente",
+      "frontend-design",
+      "auditoria-codigo",
+      "verification-before-completion"
+    ],
+    "lifecycle": [
+      "brainstorming",
+      "writing-plans",
+      "executing-plans",
+      "subagent-driven-development",
+      "systematic-debugging",
+      "requesting-code-review",
+      "receiving-code-review",
+      "analise-impacto",
+      "pesquisa-profunda",
+      "discovery",
+      "resolucao-problemas"
+    ]
+  },
+  "hooks": {
+    "state-guard": true,
+    "hookify": true
+  },
+  "preferences": {
+    "language": "pt-BR",
+    "commit_style": "conventional",
+    "no_coauthor": true,
+    "max_retries": 2,
+    "parallel_limit": 4
+  }
+}

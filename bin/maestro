@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# maestro v2 — CLI wrapper
+# Ops puras (sem AI): delegam para scripts compilados ou legacy
+# Ops com AI: instruem o usuario a usar slash commands no Claude Code
+
+set -euo pipefail
+
+MAESTRO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DIST_DIR="$MAESTRO_ROOT/dist/cli"
+LEGACY_DIR="$MAESTRO_ROOT/scripts"
+REPO_ROOT="${PWD}"
+
+usage() {
+  cat <<'EOF'
+maestro v2 <command> [arguments]
+
+Comandos sem AI (executam diretamente):
+  init              Inicializa .maestro/ com discovery (stack, MCPs, skills)
+  verify            Executa lint/test/build + security scan
+  status            Exibe estado atual do Maestro
+  dispatch <ID>     Mostra context capsule enriquecido de um ticket
+  discover          Re-detecta stack, MCPs e skills
+
+Comandos que requerem Claude Code (use os slash commands):
+  plan "<objetivo>" → /maestro-plan "<objetivo>"
+  run               → /maestro-run
+  dry-run           → /maestro-dry-run
+  setup             → /maestro-setup
+
+Instalacao:
+  bash installer/install.sh                     # Generica
+  bash installer/install.sh --profile=my-setup  # Com perfil pessoal
+
+Exemplos:
+  maestro init
+  maestro status
+  maestro verify
+  maestro dispatch DRY-001
+  maestro discover
+
+EOF
+}
+
+# Tenta usar dist/ compilado, fallback para scripts/ legacy
+run_node() {
+  local cmd="$1"
+  shift
+  if [ -f "$DIST_DIR/index.js" ]; then
+    node "$DIST_DIR/index.js" "$cmd" "$REPO_ROOT" "$@"
+  elif [ -f "$LEGACY_DIR/maestro.js" ]; then
+    node "$LEGACY_DIR/maestro.js" "$cmd" "$REPO_ROOT" "$@"
+  else
+    echo "Erro: nem dist/ nem scripts/ encontrados. Execute 'npm run build' primeiro."
+    exit 1
+  fi
+}
+
+case "${1:-}" in
+  init)
+    run_node init
+    ;;
+  verify)
+    run_node verify
+    ;;
+  status)
+    run_node status
+    ;;
+  discover)
+    run_node discover
+    ;;
+  dispatch)
+    if [ -z "${2:-}" ]; then
+      echo "Erro: dispatch requer <TICKET_ID>"
+      echo "Uso: maestro dispatch DRY-001"
+      exit 1
+    fi
+    run_node dispatch "$2"
+    ;;
+  plan)
+    if [ -z "${2:-}" ]; then
+      echo "Erro: plan requer um objetivo entre aspas"
+      echo "Uso: maestro plan \"Implementar autenticacao JWT\""
+      exit 1
+    fi
+    echo ""
+    echo "Para gerar um plano com AI, use o Claude Code:"
+    echo ""
+    echo "  /maestro-plan \"${2}\""
+    echo ""
+    echo "Ou, para executar apenas a inicializacao (sem AI):"
+    run_node init
+    ;;
+  run)
+    echo ""
+    echo "Para executar o ciclo completo com AI, use o Claude Code:"
+    echo "  /maestro-run"
+    echo ""
+    ;;
+  dry-run)
+    echo ""
+    echo "Para executar o dry-run com AI, use o Claude Code:"
+    echo "  /maestro-dry-run"
+    echo ""
+    echo "Ou, para preparar o ambiente (sem AI):"
+    run_node create-template
+    run_node init
+    run_node create-dry-run-tickets
+    echo ""
+    echo "Ambiente preparado! Execute /maestro-dry-run no Claude Code."
+    ;;
+  setup)
+    echo ""
+    echo "Para configuracao interativa, use o Claude Code:"
+    echo "  /maestro-setup"
+    echo ""
+    ;;
+  --help|-h|help|"")
+    usage
+    ;;
+  *)
+    echo "Comando desconhecido: ${1}"
+    echo ""
+    usage
+    exit 1
+    ;;
+esac
